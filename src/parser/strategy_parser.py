@@ -1,5 +1,7 @@
 # src/parser/strategy_parser.py
 import re
+import yaml
+import os
 from typing import Optional
 from src.models.signal import TradingSignal, ActionType
 from src.logger.config import setup_logger
@@ -10,16 +12,32 @@ logger = setup_logger(__name__)
 class StrategyParser:
     """Универсальный парсер для разных форматов стратегий TradingView"""
 
-    # Словарь стратегий: название -> активна/неактивна
-    STRATEGIES = {
-        "Стратегия контрольной точки разворота (1, 1)": True,
-        "MACD (12, 26, 9)": False,
-    }
+    @classmethod
+    def load_strategies_config(cls) -> dict:
+        """Загружает конфигурацию стратегий из YAML файла"""
+        config_path = "config.yaml"
+
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Файл конфигурации {config_path} не найден")
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as file:
+                config = yaml.safe_load(file)
+
+            strategies = config.get('strategies', {}).get('available', {})
+            if not strategies:
+                raise ValueError("В config.yaml не найдена секция strategies.available или она пуста")
+
+            return strategies
+
+        except Exception as e:
+            raise ValueError(f"Ошибка загрузки стратегий из config.yaml: {e}")
 
     @classmethod
     def validate_strategies(cls) -> None:
         """Проверяет что активна ровно одна стратегия"""
-        active_strategies = [name for name, active in cls.STRATEGIES.items() if active]
+        strategies = cls.load_strategies_config()
+        active_strategies = [name for name, active in strategies.items() if active]
 
         if len(active_strategies) == 0:
             raise ValueError("Должна быть активна минимум одна стратегия")
@@ -32,7 +50,8 @@ class StrategyParser:
     @classmethod
     def get_active_strategy(cls) -> str:
         """Возвращает название активной стратегии"""
-        for name, active in cls.STRATEGIES.items():
+        strategies = cls.load_strategies_config()
+        for name, active in strategies.items():
             if active:
                 return name
         raise ValueError("Нет активной стратегии")
@@ -54,6 +73,9 @@ class StrategyParser:
         logger.info(f"Парсинг сообщения: {text_message}")
 
         try:
+            # Загружаем актуальную конфигурацию стратегий
+            strategies = cls.load_strategies_config()
+
             # Ищем паттерн: "Название стратегии: SYMBOL TIMEFRAME ACTION"
             pattern = r'^(.+?):\s*([A-Z]+[A-Z0-9]*)\s+(\w+)\s+(buy|sell)$'
             match = re.match(pattern, text_message, re.IGNORECASE)
@@ -68,12 +90,12 @@ class StrategyParser:
             action_str = match.group(4).lower()
 
             # Проверяем что стратегия известна
-            if strategy_name not in cls.STRATEGIES:
+            if strategy_name not in strategies:
                 logger.warning(f"Неизвестная стратегия: {strategy_name}")
                 return None
 
             # Проверяем что стратегия активна
-            if not cls.STRATEGIES[strategy_name]:
+            if not strategies[strategy_name]:
                 logger.info(f"Стратегия отключена: {strategy_name}")
                 return None
 
