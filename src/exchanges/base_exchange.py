@@ -95,7 +95,8 @@ class BaseExchange(ABC):
         """
         pass
 
-    def extract_quote_currency(self, symbol: str) -> str:
+    @staticmethod
+    def extract_quote_currency(symbol: str) -> str:
         """
         Извлекает валюту котировки из торгового символа
 

@@ -68,7 +68,8 @@ class PivotReversalStrategy(BaseStrategy):
             logger.error(f"Ошибка обработки сигнала {signal}: {e}")
             return False
 
-    def _get_position_size(self) -> float:
+    @staticmethod
+    def _get_position_size() -> float:
         """Получает размер позиции из конфигурации биржи"""
         import yaml
 
@@ -76,10 +77,14 @@ class PivotReversalStrategy(BaseStrategy):
             with open("config.yaml", 'r', encoding='utf-8') as file:
                 config = yaml.safe_load(file)
 
-            return config.get('exchange', {}).get('position_size', 100.0)
+            position_size = config.get('exchange', {}).get('position_size')
+            if position_size is None:
+                raise ValueError("В config.yaml не найдено обязательное поле exchange.position_size")
+
+            return float(position_size)
         except Exception as e:
-            logger.error(f"Ошибка получения размера позиции: {e}")
-            return 100.0  # Значение по умолчанию
+            logger.error(f"Критическая ошибка получения размера позиции: {e}")
+            raise RuntimeError(f"Не удалось загрузить размер позиции из конфигурации: {e}")
 
     def _open_new_position(self, signal: TradingSignal, symbol: str, position_size: float, quote_currency: str) -> bool:
         """Открывает новую позицию"""
@@ -91,17 +96,14 @@ class PivotReversalStrategy(BaseStrategy):
 
         if signal.is_buy:
             success = self.exchange.open_long_position(symbol, position_size)
-            direction = "Long"
         else:
             success = self.exchange.open_short_position(symbol, position_size)
-            direction = "Short"
 
-        if success:
-            logger.info(f"Открыта {direction} позиция {symbol}")
-            return True
-        else:
+        if not success:
+            direction = "Long" if signal.is_buy else "Short"
             logger.error(f"Не удалось открыть {direction} позицию {symbol}")
-            return False
+
+        return success
 
     def _reverse_position(self, signal: TradingSignal, symbol: str, position_size: float, quote_currency: str) -> bool:
         """Разворачивает позицию"""
@@ -113,7 +115,7 @@ class PivotReversalStrategy(BaseStrategy):
             return False
 
         # Небольшая задержка после закрытия
-        time.sleep(1)
+        time.sleep(0.5)
 
         # Открываем новую позицию в противоположном направлении
         return self._open_new_position(signal, symbol, position_size, quote_currency)

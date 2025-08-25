@@ -3,6 +3,7 @@ from pybit.unified_trading import HTTP
 from typing import Optional, Dict, Any
 from src.logger.config import setup_logger
 from ..base_exchange import BaseExchange
+from ..retry_handler import retry_on_api_error
 from .config import BybitConfig
 
 
@@ -102,61 +103,49 @@ class BybitClient(BaseExchange):
 
         return rounded_qty
 
+    @retry_on_api_error()
     def get_account_balance(self, currency: str) -> float:
         """Получает баланс аккаунта для указанной валюты"""
-        try:
-            response = self.session.get_wallet_balance(accountType="UNIFIED")
+        response = self.session.get_wallet_balance(accountType="UNIFIED")
 
-            if response['retCode'] == 0:
-                for coin in response['result']['list'][0]['coin']:
-                    if coin['coin'] == currency:
-                        return float(coin['walletBalance'])
-            return 0.0
+        if response['retCode'] == 0:
+            for coin in response['result']['list'][0]['coin']:
+                if coin['coin'] == currency:
+                    return float(coin['walletBalance'])
+        return 0.0
 
-        except Exception as e:
-            self.logger.error(f"Ошибка получения баланса {currency}: {e}")
-            return 0.0
-
+    @retry_on_api_error()
     def get_current_position(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Получает текущую позицию по символу"""
-        try:
-            response = self.session.get_positions(
-                category="linear",
-                symbol=symbol
-            )
+        response = self.session.get_positions(
+            category="linear",
+            symbol=symbol
+        )
 
-            if response['retCode'] == 0 and response['result']['list']:
-                position = response['result']['list'][0]
-                size = float(position['size'])
+        if response['retCode'] == 0 and response['result']['list']:
+            position = response['result']['list'][0]
+            size = float(position['size'])
 
-                if size > 0:
-                    return {
-                        'side': position['side'],
-                        'size': size,
-                        'entry_price': float(position['avgPrice']),
-                        'unrealized_pnl': float(position['unrealisedPnl'])
-                    }
-            return None
+            if size > 0:
+                return {
+                    'side': position['side'],
+                    'size': size,
+                    'entry_price': float(position['avgPrice']),
+                    'unrealized_pnl': float(position['unrealisedPnl'])
+                }
+        return None
 
-        except Exception as e:
-            self.logger.error(f"Ошибка получения позиции {symbol}: {e}")
-            return None
-
+    @retry_on_api_error()
     def get_current_price(self, symbol: str) -> float:
         """Получает текущую цену символа"""
-        try:
-            response = self.session.get_tickers(
-                category="linear",
-                symbol=symbol
-            )
+        response = self.session.get_tickers(
+            category="linear",
+            symbol=symbol
+        )
 
-            if response['retCode'] == 0 and response['result']['list']:
-                return float(response['result']['list'][0]['lastPrice'])
-            return 0.0
-
-        except Exception as e:
-            self.logger.error(f"Ошибка получения цены {symbol}: {e}")
-            return 0.0
+        if response['retCode'] == 0 and response['result']['list']:
+            return float(response['result']['list'][0]['lastPrice'])
+        return 0.0
 
     def _calculate_quantity(self, symbol: str, position_size: float, current_price: float) -> float:
         """Вычисляет количество для торговли"""
@@ -175,70 +164,59 @@ class BybitClient(BaseExchange):
         """Открывает короткую позицию"""
         return self._open_position(symbol, "Sell", position_size)
 
+    @retry_on_api_error()
     def _open_position(self, symbol: str, side: str, position_size: float) -> bool:
         """Открывает позицию"""
-        try:
-            current_price = self.get_current_price(symbol)
-            if current_price == 0:
-                self.logger.error(f"Не удалось получить цену для {symbol}")
-                return False
-
-            # Проверяем баланс
-            quote_currency = self.extract_quote_currency(symbol)
-            balance = self.get_account_balance(quote_currency)
-            if balance < position_size:
-                self.logger.error(
-                    f"Недостаточно средств {quote_currency}. Требуется: {position_size}, доступно: {balance}")
-                return False
-
-            quantity = self._calculate_quantity(symbol, position_size, current_price)
-
-            response = self.session.place_order(
-                category="linear",
-                symbol=symbol,
-                side=side,
-                orderType="Market",
-                qty=str(quantity)
-            )
-
-            if response['retCode'] == 0:
-                direction = "Long" if side == "Buy" else "Short"
-                self.logger.info(f"Открыта {direction} позиция {symbol}: {position_size} по {current_price}")
-                return True
-            else:
-                self.logger.error(f"Ошибка открытия позиции {symbol}: {response['retMsg']}")
-                return False
-
-        except Exception as e:
-            self.logger.error(f"Ошибка открытия позиции {symbol}: {e}")
+        current_price = self.get_current_price(symbol)
+        if current_price == 0:
+            self.logger.error(f"Не удалось получить цену для {symbol}")
             return False
 
+        # Проверяем баланс
+        quote_currency = self.extract_quote_currency(symbol)
+        balance = self.get_account_balance(quote_currency)
+        if balance < position_size:
+            self.logger.error(f"Недостаточно средств {quote_currency}. Требуется: {position_size}, доступно: {balance}")
+            return False
+
+        quantity = self._calculate_quantity(symbol, position_size, current_price)
+
+        response = self.session.place_order(
+            category="linear",
+            symbol=symbol,
+            side=side,
+            orderType="Market",
+            qty=str(quantity)
+        )
+
+        if response['retCode'] == 0:
+            direction = "Long" if side == "Buy" else "Short"
+            self.logger.info(f"Открыта {direction} позиция {symbol}: {position_size} по {current_price}")
+            return True
+        else:
+            raise Exception(f"ByBit API ошибка: {response['retMsg']}")
+
+    @retry_on_api_error()
     def close_position(self, symbol: str) -> bool:
         """Закрывает текущую позицию по символу"""
         position = self.get_current_position(symbol)
         if not position:
             return True  # Позиции нет, считаем что закрыто
 
-        try:
-            opposite_side = "Sell" if position['side'] == "Buy" else "Buy"
-            rounded_size = self._round_quantity(position['size'], symbol)
+        opposite_side = "Sell" if position['side'] == "Buy" else "Buy"
+        rounded_size = self._round_quantity(position['size'], symbol)
 
-            response = self.session.place_order(
-                category="linear",
-                symbol=symbol,
-                side=opposite_side,
-                orderType="Market",
-                qty=str(rounded_size),
-                reduceOnly=True
-            )
+        response = self.session.place_order(
+            category="linear",
+            symbol=symbol,
+            side=opposite_side,
+            orderType="Market",
+            qty=str(rounded_size),
+            reduceOnly=True
+        )
 
-            if response['retCode'] == 0:
-                self.logger.info(f"Закрыта {position['side']} позиция {symbol}, PnL: {position['unrealized_pnl']}")
-                return True
-            else:
-                self.logger.error(f"Ошибка закрытия позиции {symbol}: {response['retMsg']}")
-                return False
-
-        except Exception as e:
-            self.logger.error(f"Ошибка закрытия позиции {symbol}: {e}")
-            return False
+        if response['retCode'] == 0:
+            self.logger.info(f"Закрыта {position['side']} позиция {symbol}, PnL: {position['unrealized_pnl']}")
+            return True
+        else:
+            raise Exception(f"ByBit API ошибка закрытия позиции: {response['retMsg']}")

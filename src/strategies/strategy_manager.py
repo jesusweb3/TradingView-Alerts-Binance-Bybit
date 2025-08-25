@@ -3,7 +3,6 @@ import yaml
 import os
 from typing import Dict, Optional
 from src.logger.config import setup_logger
-from src.models.signal import TradingSignal
 from .base_strategy import BaseStrategy
 from .pivot_reversal.strategy import PivotReversalStrategy
 

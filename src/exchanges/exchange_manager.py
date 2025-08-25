@@ -17,7 +17,8 @@ class ExchangeManager:
         self.active_exchange: Optional[BaseExchange] = None
         self._initialize_exchange()
 
-    def _load_exchange_config(self) -> dict:
+    @staticmethod
+    def _load_exchange_config() -> dict:
         """Загружает конфигурацию бирж из YAML файла"""
         config_path = "config.yaml"
 

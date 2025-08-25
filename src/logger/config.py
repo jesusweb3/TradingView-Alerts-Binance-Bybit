@@ -13,14 +13,11 @@ def setup_logger(name: str = __name__) -> logging.Logger:
 
     if not logger.handlers:
         logger.setLevel(logging.INFO)
-
-        # Формат без указания модуля
         formatter = logging.Formatter(
             '%(asctime)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
 
-        # Создаем файл лога по текущей дате
         current_date = datetime.now().strftime('%Y-%m-%d')
         log_filename = f"{logs_dir}/{current_date}.log"
 

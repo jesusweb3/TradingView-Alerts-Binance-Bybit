@@ -4,6 +4,7 @@ from binance.exceptions import BinanceAPIException
 from typing import Optional, Dict, Any
 from src.logger.config import setup_logger
 from ..base_exchange import BaseExchange
+from ..retry_handler import retry_on_api_error
 from .config import BinanceConfig
 
 
@@ -104,52 +105,40 @@ class BinanceClient(BaseExchange):
 
         return rounded_qty
 
+    @retry_on_api_error()
     def get_account_balance(self, currency: str) -> float:
         """Получает баланс аккаунта для указанной валюты"""
-        try:
-            account = self.client.futures_account()
+        account = self.client.futures_account()
 
-            for asset in account['assets']:
-                if asset['asset'] == currency:
-                    return float(asset['walletBalance'])
-            return 0.0
+        for asset in account['assets']:
+            if asset['asset'] == currency:
+                return float(asset['walletBalance'])
+        return 0.0
 
-        except Exception as e:
-            self.logger.error(f"Ошибка получения баланса {currency}: {e}")
-            return 0.0
-
+    @retry_on_api_error()
     def get_current_position(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Получает текущую позицию по символу"""
-        try:
-            positions = self.client.futures_position_information(symbol=symbol)
+        positions = self.client.futures_position_information(symbol=symbol)
 
-            if positions:
-                position = positions[0]
-                size = abs(float(position['positionAmt']))
+        if positions:
+            position = positions[0]
+            size = abs(float(position['positionAmt']))
 
-                if size > 0:
-                    side = "Buy" if float(position['positionAmt']) > 0 else "Sell"
-                    return {
-                        'side': side,
-                        'size': size,
-                        'entry_price': float(position['entryPrice']),
-                        'unrealized_pnl': float(position['unRealizedProfit'])
-                    }
-            return None
+            if size > 0:
+                side = "Buy" if float(position['positionAmt']) > 0 else "Sell"
+                return {
+                    'side': side,
+                    'size': size,
+                    'entry_price': float(position['entryPrice']),
+                    'unrealized_pnl': float(position['unRealizedProfit'])
+                }
+        return None
 
-        except Exception as e:
-            self.logger.error(f"Ошибка получения позиции {symbol}: {e}")
-            return None
-
+    @retry_on_api_error()
     def get_current_price(self, symbol: str) -> float:
         """Получает текущую цену символа"""
-        try:
-            ticker = self.client.futures_symbol_ticker(symbol=symbol)
-            return float(ticker['price'])
-
-        except Exception as e:
-            self.logger.error(f"Ошибка получения цены {symbol}: {e}")
-            return 0.0
+        ticker = self.client.futures_symbol_ticker(symbol=symbol)
+        return float(ticker['price'])
 
     def _calculate_quantity(self, symbol: str, position_size: float, current_price: float) -> float:
         """Вычисляет количество для торговли"""
@@ -168,65 +157,56 @@ class BinanceClient(BaseExchange):
         """Открывает короткую позицию"""
         return self._open_position(symbol, "SELL", position_size)
 
+    @retry_on_api_error()
     def _open_position(self, symbol: str, side: str, position_size: float) -> bool:
         """Открывает позицию"""
-        try:
-            current_price = self.get_current_price(symbol)
-            if current_price == 0:
-                self.logger.error(f"Не удалось получить цену для {symbol}")
-                return False
-
-            # Проверяем баланс
-            quote_currency = self.extract_quote_currency(symbol)
-            balance = self.get_account_balance(quote_currency)
-            if balance < position_size:
-                self.logger.error(
-                    f"Недостаточно средств {quote_currency}. Требуется: {position_size}, доступно: {balance}")
-                return False
-
-            quantity = self._calculate_quantity(symbol, position_size, current_price)
-            info = self._get_instrument_info(symbol)
-
-            if info['min_qty'] and quantity < info['min_qty']:
-                self.logger.error(f"Количество {quantity} меньше минимального {info['min_qty']}")
-                return False
-
-            self.client.futures_create_order(
-                symbol=symbol,
-                side=side,
-                type='MARKET',
-                quantity=quantity
-            )
-
-            direction = "Long" if side == "BUY" else "Short"
-            self.logger.info(f"Открыта {direction} позиция {symbol}: {position_size} по {current_price}")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Ошибка открытия позиции {symbol}: {e}")
+        current_price = self.get_current_price(symbol)
+        if current_price == 0:
+            self.logger.error(f"Не удалось получить цену для {symbol}")
             return False
 
+        # Проверяем баланс
+        quote_currency = self.extract_quote_currency(symbol)
+        balance = self.get_account_balance(quote_currency)
+        if balance < position_size:
+            self.logger.error(f"Недостаточно средств {quote_currency}. Требуется: {position_size}, доступно: {balance}")
+            return False
+
+        quantity = self._calculate_quantity(symbol, position_size, current_price)
+        info = self._get_instrument_info(symbol)
+
+        if info['min_qty'] and quantity < info['min_qty']:
+            self.logger.error(f"Количество {quantity} меньше минимального {info['min_qty']}")
+            return False
+
+        self.client.futures_create_order(
+            symbol=symbol,
+            side=side,
+            type='MARKET',
+            quantity=quantity
+        )
+
+        direction = "Long" if side == "BUY" else "Short"
+        self.logger.info(f"Открыта {direction} позиция {symbol}: {position_size} по {current_price}")
+        return True
+
+    @retry_on_api_error()
     def close_position(self, symbol: str) -> bool:
         """Закрывает текущую позицию по символу"""
         position = self.get_current_position(symbol)
         if not position:
             return True  # Позиции нет, считаем что закрыто
 
-        try:
-            opposite_side = "SELL" if position['side'] == "Buy" else "BUY"
-            rounded_size = self._round_quantity(position['size'], symbol)
+        opposite_side = "SELL" if position['side'] == "Buy" else "BUY"
+        rounded_size = self._round_quantity(position['size'], symbol)
 
-            self.client.futures_create_order(
-                symbol=symbol,
-                side=opposite_side,
-                type='MARKET',
-                quantity=rounded_size,
-                reduceOnly=True
-            )
+        self.client.futures_create_order(
+            symbol=symbol,
+            side=opposite_side,
+            type='MARKET',
+            quantity=rounded_size,
+            reduceOnly=True
+        )
 
-            self.logger.info(f"Закрыта {position['side']} позиция {symbol}, PnL: {position['unrealized_pnl']}")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Ошибка закрытия позиции {symbol}: {e}")
-            return False
+        self.logger.info(f"Закрыта {position['side']} позиция {symbol}, PnL: {position['unrealized_pnl']}")
+        return True
