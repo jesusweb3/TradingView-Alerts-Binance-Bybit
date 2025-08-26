@@ -4,16 +4,33 @@ import json
 from typing import Set, Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
 from src.logger.config import setup_logger
 from src.config.manager import config_manager
 from src.strategies.strategy_manager import StrategyManager
+from src.monitoring.health_monitor import health_monitor
+from src.monitoring.restart_manager import restart_manager
 
 logger = setup_logger(__name__)
 
 # Глобальные переменные для кеширования
 _allowed_ips: Set[str] = set()
 _strategy_manager: Optional[StrategyManager] = None
+
+
+class RequestTrackingMiddleware(BaseHTTPMiddleware):
+    """Middleware для отслеживания запросов в мониторе здоровья"""
+
+    async def dispatch(self, request, call_next):
+        # Выполняем запрос
+        response = await call_next(request)
+
+        # Записываем успешный запрос в монитор (только для webhook)
+        if request.url.path == "/webhook" and response.status_code == 200:
+            health_monitor.record_request()
+
+        return response
 
 
 async def initialize_app():
@@ -30,6 +47,13 @@ async def initialize_app():
         _strategy_manager = StrategyManager()
         logger.info("Менеджер стратегий инициализирован")
 
+        # Настраиваем callback для перезапуска
+        health_monitor.restart_callback = restart_manager.request_restart
+
+        # Запускаем мониторинг здоровья
+        health_monitor.start_monitoring()
+        logger.info("Мониторинг здоровья запущен")
+
     except Exception as e:
         logger.error(f"Ошибка инициализации приложения: {e}")
         raise
@@ -38,8 +62,18 @@ async def initialize_app():
 async def cleanup_app():
     """Очистка ресурсов при завершении приложения"""
     global _strategy_manager
-    _strategy_manager = None
-    logger.info("Ресурсы приложения очищены")
+
+    try:
+        # Останавливаем мониторинг
+        health_monitor.stop_monitoring()
+        logger.info("Мониторинг здоровья остановлен")
+
+        # Очищаем ресурсы
+        _strategy_manager = None
+        logger.info("Ресурсы приложения очищены")
+
+    except Exception as e:
+        logger.error(f"Ошибка при очистке ресурсов: {e}")
 
 
 @asynccontextmanager
@@ -53,6 +87,9 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Добавляем middleware для отслеживания запросов
+app.add_middleware(RequestTrackingMiddleware)
 
 
 def is_port_in_use(port: int) -> bool:
@@ -133,34 +170,6 @@ async def webhook_handler(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/reload-config")
-async def reload_config():
-    """Endpoint для перезагрузки конфигурации"""
-    try:
-        global _allowed_ips, _strategy_manager
-
-        if _strategy_manager is None:
-            logger.error("Менеджер стратегий не инициализирован")
-            raise HTTPException(status_code=500, detail="Сервер не готов")
-
-        # Перезагружаем конфигурацию
-        config_manager.reload()
-
-        # Обновляем кешированные данные
-        server_config = config_manager.get_server_config()
-        _allowed_ips = set(server_config['allowed_ips'])
-
-        # Перезагружаем стратегии
-        _strategy_manager.reload_config()
-
-        logger.info("Конфигурация успешно перезагружена")
-        return {"status": "success", "message": "Конфигурация перезагружена"}
-
-    except Exception as e:
-        logger.error(f"Ошибка перезагрузки конфигурации: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 def start_server_sync():
     """Синхронная функция запуска сервера"""
     logger.info("Запуск сервера")
@@ -171,6 +180,7 @@ def start_server_sync():
     # Показываем webhook URL синхронно
     server_ip = get_server_ip()
     logger.info(f"Ваш хук для TradingView: http://{server_ip}/webhook")
+    logger.info(f"Health check: http://{server_ip}/health")
 
     uvicorn.run(
         app,
