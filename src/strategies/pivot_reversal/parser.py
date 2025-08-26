@@ -10,7 +10,24 @@ logger = setup_logger(__name__)
 class PivotReversalParser:
     """Парсер для стратегии контрольной точки разворота"""
 
-    STRATEGY_NAME = "Стратегия контрольной точки разворота (1, 1)"
+    # Паттерн для распознавания стратегии по регулярному выражению
+    STRATEGY_PATTERN = r'^Стратегия контрольной точки разворота \(\d+,\s*\d+\):'
+
+    @classmethod
+    def can_parse(cls, message: str) -> bool:
+        """
+        Проверяет может ли этот парсер обработать сообщение
+
+        Args:
+            message: Сообщение от TradingView
+
+        Returns:
+            True если сообщение от стратегии контрольной точки разворота
+        """
+        if not message or not isinstance(message, str):
+            return False
+
+        return bool(re.match(cls.STRATEGY_PATTERN, message.strip()))
 
     @classmethod
     def parse(cls, message: str) -> Optional[TradingSignal]:
@@ -19,20 +36,17 @@ class PivotReversalParser:
 
         Ожидаемый формат:
         "Стратегия контрольной точки разворота (1, 1): ETHUSDT 1 buy"
+        "Стратегия контрольной точки разворота (78, 46): ETHUSDT 1 sell"
 
         Returns:
             TradingSignal или None если сообщение не от этой стратегии
         """
-        if not message or not isinstance(message, str):
+        if not cls.can_parse(message):
             return None
 
         message = message.strip()
 
         try:
-            # Проверяем что сообщение от нашей стратегии
-            if not message.startswith(cls.STRATEGY_NAME + ":"):
-                return None
-
             # Ищем паттерн: "Название стратегии: SYMBOL TIMEFRAME ACTION"
             pattern = r'^(.+?):\s*([A-Z]+[A-Z0-9]*)\s+(\w+)\s+(buy|sell)$'
             match = re.match(pattern, message, re.IGNORECASE)

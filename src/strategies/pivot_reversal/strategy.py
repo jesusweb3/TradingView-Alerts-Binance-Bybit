@@ -14,8 +14,8 @@ logger = setup_logger(__name__)
 class PivotReversalStrategy(BaseStrategy):
     """Стратегия контрольной точки разворота"""
 
-    def __init__(self):
-        super().__init__("Стратегия контрольной точки разворота (1, 1)")
+    def __init__(self, strategy_name: str):
+        super().__init__(strategy_name)
         self.parser = PivotReversalParser()
         self.filter = PivotReversalFilter()
         self.exchange_manager = ExchangeManager()
