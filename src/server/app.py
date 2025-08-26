@@ -242,5 +242,6 @@ def start_server():
         app,
         host="0.0.0.0",
         port=80,
+        http="httptools",
         log_level="error"
     )
