@@ -4,14 +4,17 @@ from typing import Optional, Dict, Any
 from src.logger.config import setup_logger
 from ..base_exchange import BaseExchange
 from ..retry_handler import retry_on_api_error
+from ..quantity_calculator import QuantityCalculator
 from .config import BybitConfig
 
 
-class BybitClient(BaseExchange):
+class BybitClient(BaseExchange, QuantityCalculator):
     """Клиент для работы с ByBit биржей"""
 
     def __init__(self, api_key: str, secret: str, testnet: bool, position_size: float, leverage: int):
-        super().__init__("ByBit")
+        BaseExchange.__init__(self, "ByBit")
+        QuantityCalculator.__init__(self, leverage)
+
         self.config = BybitConfig(api_key, secret, testnet, position_size, leverage)
         self.logger = setup_logger(__name__)
 
@@ -21,14 +24,8 @@ class BybitClient(BaseExchange):
             api_secret=self.config.secret
         )
 
-        # Параметры инструментов (заполняются при первом использовании)
-        self._instruments_info = {}
-
-    def _get_instrument_info(self, symbol: str):
-        """Получает информацию об инструменте"""
-        if symbol in self._instruments_info:
-            return self._instruments_info[symbol]
-
+    def _fetch_instrument_info(self, symbol: str) -> Dict[str, Any]:
+        """Получает информацию об инструменте с ByBit API"""
         try:
             response = self.session.get_instruments_info(
                 category="linear",
@@ -43,13 +40,10 @@ class BybitClient(BaseExchange):
 
                 info = {
                     'qty_step': float(lot_size_filter['qtyStep']),
-                    'min_order_qty': float(lot_size_filter['minOrderQty']),
-                    'max_order_qty': float(lot_size_filter['maxOrderQty']),
+                    'min_qty': float(lot_size_filter['minOrderQty']),
+                    'max_qty': float(lot_size_filter['maxOrderQty']),
                     'tick_size': float(price_filter['tickSize'])
                 }
-
-                self._instruments_info[symbol] = info
-                self.logger.info(f"Параметры {symbol}: QtyStep={info['qty_step']}, MinQty={info['min_order_qty']}")
 
                 # Устанавливаем плечо для этого символа
                 self._setup_leverage(symbol)
@@ -84,24 +78,6 @@ class BybitClient(BaseExchange):
                 self.logger.info(f"Плечо уже установлено {self.config.leverage}x для {symbol}")
             else:
                 self.logger.error(f"Ошибка установки плеча для {symbol}: {e}")
-
-    def _round_quantity(self, quantity: float, symbol: str) -> float:
-        """Округляет количество в соответствии с требованиями биржи"""
-        info = self._get_instrument_info(symbol)
-        qty_step = info['qty_step']
-        min_qty = info['min_order_qty']
-        max_qty = info['max_order_qty']
-
-        precision = len(str(qty_step).split('.')[-1]) if '.' in str(qty_step) else 0
-        rounded_qty = round(quantity / qty_step) * qty_step
-        rounded_qty = round(rounded_qty, precision)
-
-        if rounded_qty < min_qty:
-            rounded_qty = min_qty
-        elif rounded_qty > max_qty:
-            rounded_qty = max_qty
-
-        return rounded_qty
 
     @retry_on_api_error()
     def get_account_balance(self, currency: str) -> float:
@@ -147,15 +123,6 @@ class BybitClient(BaseExchange):
             return float(response['result']['list'][0]['lastPrice'])
         return 0.0
 
-    def _calculate_quantity(self, symbol: str, position_size: float, current_price: float) -> float:
-        """Вычисляет количество для торговли"""
-        total_value = position_size * self.config.leverage
-        raw_quantity = total_value / current_price
-        rounded_quantity = self._round_quantity(raw_quantity, symbol)
-
-        self.logger.info(f"Расчет для {symbol}: {total_value} / {current_price} = {rounded_quantity}")
-        return rounded_quantity
-
     def open_long_position(self, symbol: str, position_size: float) -> bool:
         """Открывает длинную позицию"""
         return self._open_position(symbol, "Buy", position_size)
@@ -179,7 +146,12 @@ class BybitClient(BaseExchange):
             self.logger.error(f"Недостаточно средств {quote_currency}. Требуется: {position_size}, доступно: {balance}")
             return False
 
-        quantity = self._calculate_quantity(symbol, position_size, current_price)
+        # Используем общий метод расчета количества
+        quantity = self.calculate_quantity(symbol, position_size, current_price)
+
+        # Валидация количества
+        if not self.validate_quantity(quantity, symbol):
+            return False
 
         response = self.session.place_order(
             category="linear",
@@ -204,7 +176,7 @@ class BybitClient(BaseExchange):
             return True  # Позиции нет, считаем что закрыто
 
         opposite_side = "Sell" if position['side'] == "Buy" else "Buy"
-        rounded_size = self._round_quantity(position['size'], symbol)
+        rounded_size = self.round_quantity(position['size'], symbol)
 
         response = self.session.place_order(
             category="linear",

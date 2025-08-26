@@ -5,14 +5,17 @@ from typing import Optional, Dict, Any
 from src.logger.config import setup_logger
 from ..base_exchange import BaseExchange
 from ..retry_handler import retry_on_api_error
+from ..quantity_calculator import QuantityCalculator
 from .config import BinanceConfig
 
 
-class BinanceClient(BaseExchange):
+class BinanceClient(BaseExchange, QuantityCalculator):
     """Клиент для работы с Binance биржей"""
 
     def __init__(self, api_key: str, secret: str, testnet: bool, position_size: float, leverage: int):
-        super().__init__("Binance")
+        BaseExchange.__init__(self, "Binance")
+        QuantityCalculator.__init__(self, leverage)
+
         self.config = BinanceConfig(api_key, secret, testnet, position_size, leverage)
         self.logger = setup_logger(__name__)
 
@@ -26,14 +29,8 @@ class BinanceClient(BaseExchange):
         if self.config.testnet:
             self.client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
 
-        # Параметры инструментов (заполняются при первом использовании)
-        self._instruments_info = {}
-
-    def _get_instrument_info(self, symbol: str):
-        """Получает информацию об инструменте"""
-        if symbol in self._instruments_info:
-            return self._instruments_info[symbol]
-
+    def _fetch_instrument_info(self, symbol: str) -> Dict[str, Any]:
+        """Получает информацию об инструменте с Binance API"""
         try:
             exchange_info = self.client.futures_exchange_info()
 
@@ -62,9 +59,6 @@ class BinanceClient(BaseExchange):
                 elif filter_item['filterType'] == 'PRICE_FILTER':
                     info['tick_size'] = float(filter_item['tickSize'])
 
-            self._instruments_info[symbol] = info
-            self.logger.info(f"Параметры {symbol}: QtyStep={info['qty_step']}, MinQty={info['min_qty']}")
-
             # Устанавливаем плечо для этого символа
             self._setup_leverage(symbol)
 
@@ -90,20 +84,6 @@ class BinanceClient(BaseExchange):
                 self.logger.error(f"Ошибка установки плеча для {symbol}: {e}")
         except Exception as e:
             self.logger.error(f"Ошибка установки плеча для {symbol}: {e}")
-
-    def _round_quantity(self, quantity: float, symbol: str) -> float:
-        """Округляет количество в соответствии с требованиями биржи"""
-        info = self._get_instrument_info(symbol)
-
-        if info['qty_precision'] is None:
-            return round(quantity, 3)
-
-        rounded_qty = round(quantity, info['qty_precision'])
-
-        if info['min_qty'] and rounded_qty < info['min_qty']:
-            rounded_qty = info['min_qty']
-
-        return rounded_qty
 
     @retry_on_api_error()
     def get_account_balance(self, currency: str) -> float:
@@ -140,15 +120,6 @@ class BinanceClient(BaseExchange):
         ticker = self.client.futures_symbol_ticker(symbol=symbol)
         return float(ticker['price'])
 
-    def _calculate_quantity(self, symbol: str, position_size: float, current_price: float) -> float:
-        """Вычисляет количество для торговли"""
-        total_value = position_size * self.config.leverage
-        raw_quantity = total_value / current_price
-        rounded_quantity = self._round_quantity(raw_quantity, symbol)
-
-        self.logger.info(f"Расчет для {symbol}: {total_value} / {current_price} = {rounded_quantity}")
-        return rounded_quantity
-
     def open_long_position(self, symbol: str, position_size: float) -> bool:
         """Открывает длинную позицию"""
         return self._open_position(symbol, "BUY", position_size)
@@ -172,11 +143,11 @@ class BinanceClient(BaseExchange):
             self.logger.error(f"Недостаточно средств {quote_currency}. Требуется: {position_size}, доступно: {balance}")
             return False
 
-        quantity = self._calculate_quantity(symbol, position_size, current_price)
-        info = self._get_instrument_info(symbol)
+        # Используем общий метод расчета количества
+        quantity = self.calculate_quantity(symbol, position_size, current_price)
 
-        if info['min_qty'] and quantity < info['min_qty']:
-            self.logger.error(f"Количество {quantity} меньше минимального {info['min_qty']}")
+        # Валидация количества
+        if not self.validate_quantity(quantity, symbol):
             return False
 
         self.client.futures_create_order(
@@ -198,7 +169,7 @@ class BinanceClient(BaseExchange):
             return True  # Позиции нет, считаем что закрыто
 
         opposite_side = "SELL" if position['side'] == "Buy" else "BUY"
-        rounded_size = self._round_quantity(position['size'], symbol)
+        rounded_size = self.round_quantity(position['size'], symbol)
 
         self.client.futures_create_order(
             symbol=symbol,

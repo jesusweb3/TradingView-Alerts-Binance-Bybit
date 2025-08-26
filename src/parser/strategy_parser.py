@@ -1,10 +1,9 @@
 # src/parser/strategy_parser.py
 import re
-import yaml
-import os
 from typing import Optional
 from src.models.signal import TradingSignal, ActionType
 from src.logger.config import setup_logger
+from src.config.manager import config_manager
 
 logger = setup_logger(__name__)
 
@@ -12,54 +11,49 @@ logger = setup_logger(__name__)
 class StrategyParser:
     """Универсальный парсер для разных форматов стратегий TradingView"""
 
-    @classmethod
-    def load_strategies_config(cls) -> dict:
-        """Загружает конфигурацию стратегий из YAML файла"""
-        config_path = "config.yaml"
+    def __init__(self):
+        self._active_strategy_name = None
+        self._strategies_config = None
+        self._load_strategy_config()
 
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Файл конфигурации {config_path} не найден")
+    def _load_strategy_config(self):
+        """Загружает и кеширует конфигурацию стратегий"""
+        self._strategies_config = config_manager.get_strategies_config()
+        self._active_strategy_name = config_manager.get_active_strategy_name()
+        logger.info(f"Активная стратегия: {self._active_strategy_name}")
 
-        try:
-            with open(config_path, 'r', encoding='utf-8') as file:
-                config = yaml.safe_load(file)
+    def _is_message_from_active_strategy(self, message: str) -> bool:
+        """
+        Быстрая проверка принадлежности сообщения к активной стратегии
 
-            strategies = config.get('strategies', {}).get('available', {})
-            if not strategies:
-                raise ValueError("В config.yaml не найдена секция strategies.available или она пуста")
+        Args:
+            message: Сообщение от TradingView
 
-            return strategies
+        Returns:
+            True если сообщение от активной стратегии
+        """
+        if not message or not isinstance(message, str):
+            return False
 
-        except Exception as e:
-            raise ValueError(f"Ошибка загрузки стратегий из config.yaml: {e}")
+        message = message.strip()
 
-    @classmethod
-    def validate_strategies(cls) -> None:
-        """Проверяет что активна ровно одна стратегия"""
-        strategies = cls.load_strategies_config()
-        active_strategies = [name for name, active in strategies.items() if active]
+        # Извлекаем название стратегии из сообщения (до двоеточия)
+        colon_pos = message.find(':')
+        if colon_pos == -1:
+            return False
 
-        if len(active_strategies) == 0:
-            raise ValueError("Должна быть активна минимум одна стратегия")
-        elif len(active_strategies) > 1:
-            raise ValueError(f"Активно больше одной стратегии: {active_strategies}")
+        strategy_name_from_message = message[:colon_pos].strip()
 
-        active_strategy = active_strategies[0]
-        logger.info(f"Активная стратегия: {active_strategy}")
+        # Проверяем точное совпадение с активной стратегией
+        return strategy_name_from_message == self._active_strategy_name
 
-    @classmethod
-    def get_active_strategy(cls) -> str:
-        """Возвращает название активной стратегии"""
-        strategies = cls.load_strategies_config()
-        for name, active in strategies.items():
-            if active:
-                return name
-        raise ValueError("Нет активной стратегии")
-
-    @classmethod
-    def parse(cls, text_message: str) -> Optional[TradingSignal]:
+    def parse(self, text_message: str) -> Optional[TradingSignal]:
         """
         Парсит сообщение от TradingView в торговый сигнал
+
+        Оптимизированная версия:
+        1. Сначала проверяем активность стратегии (быстро)
+        2. Только потом делаем детальный парсинг (медленно)
 
         Поддерживаемые форматы:
         - "Стратегия контрольной точки разворота (1, 1): ETHUSDT 1 buy"
@@ -72,50 +66,77 @@ class StrategyParser:
         text_message = text_message.strip()
         logger.info(f"Парсинг сообщения: {text_message}")
 
+        # ОПТИМИЗАЦИЯ: Сначала быстро проверяем активность стратегии
+        if not self._is_message_from_active_strategy(text_message):
+            logger.info("Сообщение не от активной стратегии - пропускаем парсинг")
+            return None
+
         try:
-            # Загружаем актуальную конфигурацию стратегий
-            strategies = cls.load_strategies_config()
-
-            # Ищем паттерн: "Название стратегии: SYMBOL TIMEFRAME ACTION"
-            pattern = r'^(.+?):\s*([A-Z]+[A-Z0-9]*)\s+(\w+)\s+(buy|sell)$'
-            match = re.match(pattern, text_message, re.IGNORECASE)
-
-            if not match:
-                logger.error(f"Сообщение не соответствует ожидаемому формату: {text_message}")
-                return None
-
-            strategy_name = match.group(1).strip()
-            symbol = match.group(2).upper()
-            timeframe = match.group(3)
-            action_str = match.group(4).lower()
-
-            # Проверяем что стратегия известна
-            if strategy_name not in strategies:
-                logger.warning(f"Неизвестная стратегия: {strategy_name}")
-                return None
-
-            # Проверяем что стратегия активна
-            if not strategies[strategy_name]:
-                logger.info(f"Стратегия отключена: {strategy_name}")
-                return None
-
-            # Парсим действие
-            try:
-                action = ActionType(action_str)
-            except ValueError:
-                logger.error(f"Неизвестное действие: {action_str}")
-                return None
-
-            signal = TradingSignal(
-                strategy_name=strategy_name,
-                symbol=symbol,
-                timeframe=timeframe,
-                action=action
-            )
-
-            logger.info(f"Сигнал успешно распаршен: {signal}")
-            return signal
+            # Теперь делаем детальный парсинг только для активной стратегии
+            return self._parse_message_details(text_message)
 
         except Exception as e:
             logger.error(f"Ошибка парсинга сообщения '{text_message}': {e}")
             return None
+
+    def _parse_message_details(self, message: str) -> Optional[TradingSignal]:
+        """
+        Детальный парсинг сообщения
+
+        Args:
+            message: Сообщение от TradingView (уже проверено на активность)
+
+        Returns:
+            TradingSignal или None если формат неверный
+        """
+        # Ищем паттерн: "Название стратегии: SYMBOL TIMEFRAME ACTION"
+        pattern = r'^(.+?):\s*([A-Z]+[A-Z0-9]*)\s+(\w+)\s+(buy|sell)$'
+        match = re.match(pattern, message, re.IGNORECASE)
+
+        if not match:
+            logger.error(f"Сообщение не соответствует ожидаемому формату: {message}")
+            return None
+
+        strategy_name = match.group(1).strip()
+        symbol = match.group(2).upper()
+        timeframe = match.group(3)
+        action_str = match.group(4).lower()
+
+        # Парсим действие
+        try:
+            action = ActionType(action_str)
+        except ValueError:
+            logger.error(f"Неизвестное действие: {action_str}")
+            return None
+
+        # Дополнительная проверка что стратегия действительно активна
+        if not self._strategies_config.get(strategy_name, False):
+            logger.warning(f"Стратегия не активна: {strategy_name}")
+            return None
+
+        signal = TradingSignal(
+            strategy_name=strategy_name,
+            symbol=symbol,
+            timeframe=timeframe,
+            action=action
+        )
+
+        logger.info(f"Сигнал успешно распаршен: {signal}")
+        return signal
+
+    def reload_config(self):
+        """Перезагружает конфигурацию стратегий"""
+        config_manager.clear_cache()
+        self._load_strategy_config()
+        logger.info("Конфигурация стратегий перезагружена")
+
+    @classmethod
+    def validate_strategies(cls) -> None:
+        """Проверяет что активна ровно одна стратегия"""
+        try:
+            config_manager.get_strategies_config()
+            active_strategy = config_manager.get_active_strategy_name()
+            logger.info(f"Валидация пройдена. Активная стратегия: {active_strategy}")
+        except ValueError as e:
+            logger.error(f"Ошибка валидации стратегий: {e}")
+            raise
