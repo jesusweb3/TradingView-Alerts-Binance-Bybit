@@ -28,8 +28,7 @@ class PivotReversalSLStrategy(BaseStrategy):
             raise ValueError("PivotReversalSL стратегия поддерживает только Binance")
 
         self.position_monitor = PositionMonitor(self.exchange)
-
-        logger.info(f"Инициализирована стратегия {strategy_name} с stop-loss мониторингом")
+        self.position_monitor.log_settings()
 
     def parse_message(self, message: str) -> Optional[TradingSignal]:
         """Парсит сообщение от TradingView"""

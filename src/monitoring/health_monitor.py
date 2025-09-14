@@ -49,7 +49,7 @@ class HealthMonitor:
             name="HealthMonitor"
         )
         self.monitor_thread.start()
-        logger.info("Мониторинг состояния запущен")
+        logger.info("Мониторинг здоровья и состояния запущен")
 
     def stop_monitoring(self):
         """Останавливает мониторинг"""
@@ -119,7 +119,6 @@ class HealthMonitor:
 
     def _monitoring_loop(self):
         """Основной цикл мониторинга"""
-        logger.info("Цикл мониторинга запущен")
 
         while self.is_monitoring:
             try:

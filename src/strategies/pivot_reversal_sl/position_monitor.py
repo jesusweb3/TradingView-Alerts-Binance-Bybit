@@ -41,12 +41,6 @@ class PositionMonitor:
             self.price_difference_usdt = float(sl_config.get('price_difference_usdt', 1.0))
             self.position_fetch_delay = float(sl_config.get('position_fetch_delay', 5.0))
 
-            logger.info(f"Настройки PositionMonitor загружены: "
-                        f"PnL порог: {self.pnl_threshold_percent}%, "
-                        f"Stop-loss: {self.stop_loss_percent}%, "
-                        f"Разница цен: ${self.price_difference_usdt}, "
-                        f"Задержка: {self.position_fetch_delay}с")
-
         except Exception as e:
             logger.warning(f"Ошибка загрузки настроек из конфига: {e}. Используем значения по умолчанию")
             # Значения по умолчанию
@@ -54,6 +48,14 @@ class PositionMonitor:
             self.stop_loss_percent = 1.2
             self.price_difference_usdt = 1.0
             self.position_fetch_delay = 5.0
+
+    def log_settings(self):
+        """Выводит настройки мониторинга в лог"""
+        logger.info(f"Настройки для мониторинга: "
+                    f"PnL порог: {self.pnl_threshold_percent}%, "
+                    f"Stop-loss: {self.stop_loss_percent}%, "
+                    f"Разница цен: ${self.price_difference_usdt}, "
+                    f"Задержка: {self.position_fetch_delay}с")
 
     def start_monitoring(self, symbol: str) -> bool:
         """

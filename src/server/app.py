@@ -52,7 +52,6 @@ async def initialize_app():
 
         # Запускаем мониторинг здоровья
         health_monitor.start_monitoring()
-        logger.info("Мониторинг здоровья запущен")
 
     except Exception as e:
         logger.error(f"Ошибка инициализации приложения: {e}")

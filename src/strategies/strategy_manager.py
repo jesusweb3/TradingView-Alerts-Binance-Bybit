@@ -24,15 +24,13 @@ class StrategyManager:
         if active_strategy_name.startswith("Стратегия контрольной точки разворота SL"):
             # Стратегия с stop-loss мониторингом
             self.active_strategy = PivotReversalSLStrategy(active_strategy_name)
-            logger.info(f"Создана активная SL стратегия: {active_strategy_name}")
         elif active_strategy_name.startswith("Стратегия контрольной точки разворота"):
             # Обычная стратегия pivot_reversal
             self.active_strategy = PivotReversalStrategy(active_strategy_name)
-            logger.info(f"Создана активная обычная стратегия: {active_strategy_name}")
         else:
             raise ValueError(f"Неподдерживаемая стратегия: {active_strategy_name}")
 
-        logger.info(f"Активная стратегия: {active_strategy_name} (тип: {type(self.active_strategy).__name__})")
+        logger.info(f"Активная стратегия: {active_strategy_name}")
 
     def process_webhook_message(self, message: str) -> Optional[dict]:
         """
