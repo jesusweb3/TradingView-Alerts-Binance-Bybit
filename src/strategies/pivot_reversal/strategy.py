@@ -40,29 +40,31 @@ class PivotReversalStrategy(BaseStrategy):
         4. Если есть позиция в противоположном направлении - разворачиваем
         """
         try:
-            symbol = signal.symbol
-            current_position = self.exchange.get_current_position(symbol)
+            # Нормализуем символ для работы с биржей
+            normalized_symbol = self.exchange.normalize_symbol(signal.symbol)
 
-            # Извлекаем валюту котировки из символа
-            quote_currency = self.exchange.extract_quote_currency(symbol)
+            current_position = self.exchange.get_current_position(normalized_symbol)
+
+            # Извлекаем валюту котировки из оригинального символа
+            quote_currency = self.exchange.extract_quote_currency(signal.symbol)
 
             # Получаем размер позиции из конфигурации
             position_size = self._get_position_size()
 
             if current_position is None:
                 # Позиции нет - открываем новую
-                return self._open_new_position(signal, symbol, position_size, quote_currency)
+                return self._open_new_position(signal, normalized_symbol, position_size, quote_currency)
 
             # Есть позиция - проверяем направление
             current_side = current_position['side']
 
             if (signal.is_buy and current_side == "Buy") or (signal.is_sell and current_side == "Sell"):
                 # Позиция уже в нужном направлении
-                logger.info(f"Позиция {symbol} уже в направлении {signal.action.value} - пропускаем")
+                logger.info(f"Позиция {signal.symbol} уже в направлении {signal.action.value} - пропускаем")
                 return True
 
             # Нужно развернуть позицию
-            return self._reverse_position(signal, symbol, position_size, quote_currency)
+            return self._reverse_position(signal, normalized_symbol, position_size, quote_currency)
 
         except Exception as e:
             logger.error(f"Ошибка обработки сигнала {signal}: {e}")
@@ -86,7 +88,8 @@ class PivotReversalStrategy(BaseStrategy):
             logger.error(f"Критическая ошибка получения размера позиции: {e}")
             raise RuntimeError(f"Не удалось загрузить размер позиции из конфигурации: {e}")
 
-    def _open_new_position(self, signal: TradingSignal, symbol: str, position_size: float, quote_currency: str) -> bool:
+    def _open_new_position(self, signal: TradingSignal, normalized_symbol: str, position_size: float,
+                           quote_currency: str) -> bool:
         """Открывает новую позицию"""
         # Проверяем баланс
         balance = self.exchange.get_account_balance(quote_currency)
@@ -95,27 +98,28 @@ class PivotReversalStrategy(BaseStrategy):
             return False
 
         if signal.is_buy:
-            success = self.exchange.open_long_position(symbol, position_size)
+            success = self.exchange.open_long_position(normalized_symbol, position_size)
         else:
-            success = self.exchange.open_short_position(symbol, position_size)
+            success = self.exchange.open_short_position(normalized_symbol, position_size)
 
         if not success:
             direction = "Long" if signal.is_buy else "Short"
-            logger.error(f"Не удалось открыть {direction} позицию {symbol}")
+            logger.error(f"Не удалось открыть {direction} позицию {signal.symbol}")
 
         return success
 
-    def _reverse_position(self, signal: TradingSignal, symbol: str, position_size: float, quote_currency: str) -> bool:
+    def _reverse_position(self, signal: TradingSignal, normalized_symbol: str, position_size: float,
+                          quote_currency: str) -> bool:
         """Разворачивает позицию"""
-        logger.info(f"Разворот позиции {symbol} в {signal.action.value}")
+        logger.info(f"Разворот позиции {signal.symbol} в {signal.action.value}")
 
         # Закрываем текущую позицию
-        if not self.exchange.close_position(symbol):
-            logger.error(f"Не удалось закрыть текущую позицию {symbol}")
+        if not self.exchange.close_position(normalized_symbol):
+            logger.error(f"Не удалось закрыть текущую позицию {signal.symbol}")
             return False
 
         # Небольшая задержка после закрытия
         time.sleep(0.5)
 
         # Открываем новую позицию в противоположном направлении
-        return self._open_new_position(signal, symbol, position_size, quote_currency)
+        return self._open_new_position(signal, normalized_symbol, position_size, quote_currency)

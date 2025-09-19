@@ -37,6 +37,7 @@ class PivotReversalParser:
         Ожидаемый формат:
         "Стратегия контрольной точки разворота (1, 1): ETHUSDT 1 buy"
         "Стратегия контрольной точки разворота (78, 46): ETHUSDT 1 sell"
+        "Стратегия контрольной точки разворота (2, 1): ETHUSDC.P 15S sell"
 
         Returns:
             TradingSignal или None если сообщение не от этой стратегии
@@ -48,7 +49,8 @@ class PivotReversalParser:
 
         try:
             # Ищем паттерн: "Название стратегии: SYMBOL TIMEFRAME ACTION"
-            pattern = r'^(.+?):\s*([A-Z]+[A-Z0-9]*)\s+(\w+)\s+(buy|sell)$'
+            # Обновленный паттерн поддерживает точку в символе
+            pattern = r'^(.+?):\s*([A-Z]+[A-Z0-9.]*)\s+(\w+)\s+(buy|sell)$'
             match = re.match(pattern, message, re.IGNORECASE)
 
             if not match:

@@ -96,23 +96,39 @@ class BaseExchange(ABC):
         pass
 
     @staticmethod
+    def normalize_symbol(symbol: str) -> str:
+        """
+        Нормализует торговый символ для совместимости с биржей
+
+        Args:
+            symbol: Торговый символ (например, 'ETHUSDT', 'ETHUSDC.P')
+
+        Returns:
+            Нормализованный символ без суффикса .P
+        """
+        return symbol.rstrip('.P') if symbol.endswith('.P') else symbol
+
+    @staticmethod
     def extract_quote_currency(symbol: str) -> str:
         """
         Извлекает валюту котировки из торгового символа
 
         Args:
-            symbol: Торговый символ (например, 'ETHUSDT', 'ETHUSDC')
+            symbol: Торговый символ (например, 'ETHUSDT', 'ETHUSDC.P')
 
         Returns:
             Валюта котировки ('USDT', 'USDC', etc.)
         """
-        # Обычно последние 4 символа для USDT/USDC
-        if symbol.endswith('USDT'):
+        # Убираем суффикс .P если есть
+        clean_symbol = BaseExchange.normalize_symbol(symbol)
+
+        # Применяем стандартную логику к очищенному символу
+        if clean_symbol.endswith('USDT'):
             return 'USDT'
-        elif symbol.endswith('USDC'):
+        elif clean_symbol.endswith('USDC'):
             return 'USDC'
-        elif symbol.endswith('BUSD'):
+        elif clean_symbol.endswith('BUSD'):
             return 'BUSD'
         else:
             # Fallback: берем последние 4 символа
-            return symbol[-4:] if len(symbol) > 4 else symbol
+            return clean_symbol[-4:] if len(clean_symbol) > 4 else clean_symbol
