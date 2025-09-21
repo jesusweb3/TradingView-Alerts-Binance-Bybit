@@ -6,13 +6,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
-from src.logger.config import setup_logger
+from src.utils.logger import get_logger
 from src.config.manager import config_manager
 from src.strategies.strategy_manager import StrategyManager
 from src.monitoring.health_monitor import health_monitor
 from src.monitoring.restart_manager import restart_manager
 
-logger = setup_logger(__name__)
+logger = get_logger(__name__)
 
 # Глобальные переменные для кеширования
 _allowed_ips: Set[str] = set()
@@ -42,6 +42,12 @@ async def initialize_app():
         server_config = config_manager.get_server_config()
         _allowed_ips = set(server_config['allowed_ips'])
         logger.info(f"Загружено {len(_allowed_ips)} разрешенных IP адресов")
+
+        # Проверяем конфигурацию торговли
+        trading_config = config_manager.get_trading_config()
+        symbol = trading_config['symbol']
+        enabled = trading_config['enabled']
+        logger.info(f"Торговля: {'включена' if enabled else 'отключена'}, символ: {symbol}")
 
         # Инициализируем менеджер стратегий один раз
         _strategy_manager = StrategyManager()
@@ -118,7 +124,24 @@ def get_client_ip(request: Request) -> str:
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "ok"}
+    # Добавляем информацию о торговой конфигурации
+    try:
+        symbol = config_manager.get_trading_symbol()
+        enabled = config_manager.is_trading_enabled()
+        return {
+            "status": "ok",
+            "trading": {
+                "enabled": enabled,
+                "symbol": symbol
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "ok",
+            "trading": {
+                "error": str(e)
+            }
+        }
 
 
 @app.post("/webhook")
@@ -159,7 +182,7 @@ async def webhook_handler(request: Request):
         result = _strategy_manager.process_webhook_message(message)
 
         if result is None:
-            return {"status": "ignored", "message": "Сигнал не распознан или отфильтрован"}
+            return {"status": "ignored", "message": "Сигнал не распознан"}
 
         return result
 

@@ -1,9 +1,9 @@
 # src/exchanges/retry_handler.py
 import time
 from functools import wraps
-from src.logger.config import setup_logger
+from src.utils.logger import get_logger
 
-logger = setup_logger(__name__)
+logger = get_logger(__name__)
 
 
 def retry_on_api_error(max_retries: int = 3, delay: int = 10):

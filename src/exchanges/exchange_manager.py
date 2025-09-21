@@ -1,12 +1,12 @@
 # src/exchanges/exchange_manager.py
 from typing import Optional
-from src.logger.config import setup_logger
+from src.utils.logger import get_logger
 from src.config.manager import config_manager
 from .base_exchange import BaseExchange
 from .bybit.client import BybitClient
 from .binance.client import BinanceClient
 
-logger = setup_logger(__name__)
+logger = get_logger(__name__)
 
 
 class ExchangeManager:

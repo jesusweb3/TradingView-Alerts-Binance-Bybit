@@ -1,9 +1,9 @@
 # src/exchanges/quantity_calculator.py
 from abc import ABC, abstractmethod
 from typing import Dict, Any
-from src.logger.config import setup_logger
+from src.utils.logger import get_logger
 
-logger = setup_logger(__name__)
+logger = get_logger(__name__)
 
 
 class QuantityCalculator(ABC):

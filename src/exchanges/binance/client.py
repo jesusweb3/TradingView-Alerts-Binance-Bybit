@@ -2,7 +2,7 @@
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from typing import Optional, Dict, Any
-from src.logger.config import setup_logger
+from src.utils.logger import get_logger
 from ..base_exchange import BaseExchange
 from ..retry_handler import retry_on_api_error
 from ..quantity_calculator import QuantityCalculator
@@ -17,7 +17,7 @@ class BinanceClient(BaseExchange, QuantityCalculator):
         QuantityCalculator.__init__(self, leverage)
 
         self.config = BinanceConfig(api_key, secret, testnet, position_size, leverage)
-        self.logger = setup_logger(__name__)
+        self.logger = get_logger(__name__)
 
         self.client = Client(
             api_key=self.config.api_key,

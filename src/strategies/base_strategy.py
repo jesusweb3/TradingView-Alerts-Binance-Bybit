@@ -5,7 +5,7 @@ from src.models.signal import TradingSignal
 
 
 class BaseStrategy(ABC):
-    """Базовый класс для всех торговых стратегий"""
+    """Базовый класс для торговых стратегий"""
 
     def __init__(self, name: str):
         self.name = name
@@ -19,7 +19,7 @@ class BaseStrategy(ABC):
             message: Сообщение от TradingView
 
         Returns:
-            TradingSignal если сообщение от этой стратегии, None иначе
+            TradingSignal если сообщение распознано, None иначе
         """
         pass
 

@@ -1,7 +1,7 @@
 # src/exchanges/bybit/client.py
 from pybit.unified_trading import HTTP
 from typing import Optional, Dict, Any
-from src.logger.config import setup_logger
+from src.utils.logger import get_logger
 from ..base_exchange import BaseExchange
 from ..retry_handler import retry_on_api_error
 from ..quantity_calculator import QuantityCalculator
@@ -16,7 +16,7 @@ class BybitClient(BaseExchange, QuantityCalculator):
         QuantityCalculator.__init__(self, leverage)
 
         self.config = BybitConfig(api_key, secret, testnet, position_size, leverage)
-        self.logger = setup_logger(__name__)
+        self.logger = get_logger(__name__)
 
         self.session = HTTP(
             testnet=self.config.testnet,

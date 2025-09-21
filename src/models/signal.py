@@ -10,13 +10,10 @@ class ActionType(Enum):
 
 @dataclass
 class TradingSignal:
-    strategy_name: str
-    symbol: str
-    timeframe: str
     action: ActionType
 
     def __str__(self) -> str:
-        return f"{self.strategy_name}: {self.symbol} {self.timeframe} {self.action.value}"
+        return f"Signal: {self.action.value}"
 
     @property
     def is_buy(self) -> bool:

@@ -3,9 +3,9 @@ import yaml
 import os
 from typing import Dict, Any, Optional
 from functools import lru_cache
-from src.logger.config import setup_logger
+from src.utils.logger import get_logger
 
-logger = setup_logger(__name__)
+logger = get_logger(__name__)
 
 
 class ConfigManager:
@@ -51,8 +51,6 @@ class ConfigManager:
         self._config = None
         self._load_config()
 
-    # Методы для получения специфичных секций конфигурации
-
     @lru_cache(maxsize=1)
     def get_exchange_config(self) -> dict:
         """Возвращает конфигурацию биржи с валидацией"""
@@ -79,21 +77,24 @@ class ConfigManager:
         return exchange_config
 
     @lru_cache(maxsize=1)
-    def get_strategies_config(self) -> dict:
-        """Возвращает конфигурацию стратегий с валидацией"""
-        strategies_config = self.config.get('strategies', {}).get('available', {})
-        if not strategies_config:
-            raise ValueError("В config.yaml не найдена секция strategies.available или она пуста")
+    def get_trading_config(self) -> dict:
+        """Возвращает конфигурацию торговли с валидацией"""
+        trading_config = self.config.get('trading', {})
+        if not trading_config:
+            raise ValueError("В config.yaml не найдена секция trading или она пуста")
 
-        # Валидация активности стратегий
-        active_strategies = [name for name, active in strategies_config.items() if active]
+        # Валидация обязательных полей
+        required_fields = ['enabled', 'symbol']
+        for field in required_fields:
+            if field not in trading_config:
+                raise ValueError(f"В config.yaml отсутствует обязательное поле trading.{field}")
 
-        if len(active_strategies) == 0:
-            raise ValueError("Должна быть активна минимум одна стратегия")
-        elif len(active_strategies) > 1:
-            raise ValueError(f"Активно больше одной стратегии: {active_strategies}")
+        # Валидация символа
+        symbol = trading_config.get('symbol', '')
+        if not symbol or not isinstance(symbol, str):
+            raise ValueError("В config.yaml поле trading.symbol должно быть непустой строкой")
 
-        return strategies_config
+        return trading_config
 
     @lru_cache(maxsize=1)
     def get_server_config(self) -> dict:
@@ -117,15 +118,15 @@ class ConfigManager:
 
         raise ValueError("Нет активной биржи")
 
-    def get_active_strategy_name(self) -> str:
-        """Возвращает название активной стратегии"""
-        strategies_config = self.get_strategies_config()
+    def get_trading_symbol(self) -> str:
+        """Возвращает торгуемый символ"""
+        trading_config = self.get_trading_config()
+        return trading_config['symbol']
 
-        for name, active in strategies_config.items():
-            if active:
-                return name
-
-        raise ValueError("Нет активной стратегии")
+    def is_trading_enabled(self) -> bool:
+        """Возвращает статус включения торговли"""
+        trading_config = self.get_trading_config()
+        return trading_config.get('enabled', False)
 
     def get_exchange_credentials(self, exchange_name: str) -> dict:
         """Возвращает учетные данные для указанной биржи с валидацией"""
@@ -142,7 +143,7 @@ class ConfigManager:
     def clear_cache(self):
         """Очищает кеш всех lru_cache методов"""
         self.get_exchange_config.cache_clear()
-        self.get_strategies_config.cache_clear()
+        self.get_trading_config.cache_clear()
         self.get_server_config.cache_clear()
 
 

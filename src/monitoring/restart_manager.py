@@ -3,9 +3,9 @@ import os
 import sys
 import time
 import threading
-from src.logger.config import setup_logger
+from src.utils.logger import get_logger
 
-logger = setup_logger(__name__)
+logger = get_logger(__name__)
 
 
 class RestartManager:
